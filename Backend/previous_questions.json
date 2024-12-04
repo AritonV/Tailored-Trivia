@@ -1,0 +1,74 @@
+[
+  {
+    "category": "Gaming",
+    "difficulty": "easy",
+    "question": "In the classic video game 'Pac-Man', what is the name of the main character's love interest?",
+    "answers": [
+      "Sally",
+      "Ms. Pacman",
+      "Penny",
+      "Lola"
+    ],
+    "correct_answer": "Ms. Pacman"
+  },
+  {
+    "category": "Music",
+    "difficulty": "hard",
+    "question": "Which famous music composer was known for his use of aleatoric elements in his compositions?",
+    "answers": [
+      "Karlheinz Stockhausen",
+      "Iannis Xenakis",
+      "Pierre Boulez",
+      "Edgard Var\u00e8se"
+    ],
+    "correct_answer": "Iannis Xenakis"
+  },
+  {
+    "category": "Film",
+    "difficulty": "medium",
+    "question": "What 1975 film about a killer shark was based on a novel by Peter Benchley?",
+    "answers": [
+      "Jaws 3-D",
+      "Deep Blue Sea",
+      "The Shallows",
+      "Jaws"
+    ],
+    "correct_answer": "Jaws"
+  },
+  {
+    "category": "Gaming",
+    "difficulty": "hard",
+    "question": "In the 'Final Fantasy' series, what is the name of the magical crystal that holds the power to control the elements?",
+    "answers": [
+      "Lifestream Crystal",
+      "Eternity Orb",
+      "Cosmos Sphere",
+      "Crystal of Gaia"
+    ],
+    "correct_answer": "Crystal of Gaia"
+  },
+  {
+    "category": "Gaming",
+    "difficulty": "hard",
+    "question": "In the 'Castlevania' series, what is the name of the vampire lord who serves as the main antagonist in the original 1986 game?",
+    "answers": [
+      "Dracula",
+      "Vlad Tepes",
+      "Gracchus",
+      "Medusa"
+    ],
+    "correct_answer": "Dracula"
+  },
+  {
+    "category": "Gaming",
+    "difficulty": "hard",
+    "question": "In the 'Silent Hill' series, what is the name of the fictional town that serves as the primary setting for most games in the franchise?",
+    "answers": [
+      "Alchemilla",
+      "Shepherd's Glen",
+      "Central City",
+      "Toluca Lake"
+    ],
+    "correct_answer": "Alchemilla"
+  }
+]

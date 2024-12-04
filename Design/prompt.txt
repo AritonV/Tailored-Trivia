@@ -1,0 +1,586 @@
+I need some help with a multiplayer game I am working on.
+I want to make a game similar to Kahoot or the Jackbox trivia games, but using an LLM to generate the questions after each round.
+I want to use Python with Flask for the backend and Sveltekit for the frontend.
+I want to use socket io for the WebSocket connections.
+I am using Ollama for the LLM.
+I want to use mongodb to store the games and players.
+I have already writen some of the code.
+Here is the basic project structure (This is not the final structure, we will probably be adding more pages and components):
+''''
+TailoredTrivia/
+├── Backend/
+│   └── server.py
+└── Frontend/
+    └── src/
+        ├── lib/
+        │   ├── components/
+        │   │   ├── CategoryPicker.svelte
+        │   │   ├── PlayerIcon.svelte
+        │   │   ├── ScoreBar.svelte
+        │   │   └── Timer.svelte
+        │   ├── socket.js
+        │   └── store.js
+        └── routes/
+            ├── host/
+            │   ├── answer/+page.svelte
+            │   ├── category/+page.svelte
+            │   ├── leaderboard/+page.svelte
+            │   ├── lobby/+page.svelte
+            │   ├── question/+page.svelte
+            │   ├── winner/+page.svelte
+            │   └── +layout.svelte
+            ├── player/
+            │   ├── answer/+page.svelte
+            │   ├── category/+page.svelte
+            │   ├── join/+page.svelte
+            │   ├── leaderboard/+page.svelte
+            │   ├── result/+page.svelte
+            │   ├── wait/+page.svelte
+            │   ├── winner/+page.svelte
+            │   └── +layout.svelte
+            ├── +layout.svelte
+            └── +page.svelte
+''''
+Here is the code I have written so far (This code is not final, we will most likely add and change most of it):
+(server.py)
+''''
+import random
+import string
+
+from flask import Flask, request
+from flask_socketio import SocketIO, emit, join_room, leave_room
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'secret!'
+socketio = SocketIO(app, cors_allowed_origins="*")
+
+# Store active games and their players
+games = {}
+
+
+def generate_room_code():
+  """Generate a unique 4-character room code"""
+  while True:
+    code = ''.join(random.choices(string.ascii_uppercase, k=4))
+    if code not in games:
+      return code
+
+
+@socketio.on('create_game')
+def handle_create_game(data):
+  """Handle game creation"""
+  host_id = request.sid
+  room_code = generate_room_code()
+
+  games[room_code] = {
+      'host': host_id,
+      'players': {host_id: {'name': data['name'], 'score': 0}},
+      'state': 'lobby',
+      'max_players': 8
+  }
+
+  join_room(room_code)
+  emit('game_created', {
+      'room_code': room_code,
+      'player_id': host_id,
+      'is_host': True
+  })
+
+
+@socketio.on('join_game')
+def handle_join_game(data):
+  """Handle player joining a game"""
+  room_code = data['room_code']
+  player_id = request.sid
+
+  if room_code not in games:
+    emit('error', {'message': 'Game not found'})
+    return
+
+  game = games[room_code]
+
+  if len(game['players']) >= game['max_players']:
+    emit('error', {'message': 'Game is full'})
+    return
+
+  if game['state'] != 'lobby':
+    emit('error', {'message': 'Game already in progress'})
+    return
+
+  game['players'][player_id] = {
+      'name': data['name'],
+      'score': 0
+  }
+
+  join_room(room_code)
+
+  # Notify everyone in the room about the new player
+  emit('player_joined', {
+      'player_id': player_id,
+      'name': data['name']
+  }, room=room_code)
+
+  # Send current game state to the new player
+  emit('game_joined', {
+      'room_code': room_code,
+      'player_id': player_id,
+      'is_host': False,
+      'players': game['players']
+  })
+
+
+@socketio.on('disconnect')
+def handle_disconnect():
+  """Handle player disconnection"""
+  for room_code in games:
+    game = games[room_code]
+    if request.sid in game['players']:
+      # Remove player from game
+      player_name = game['players'][request.sid]['name']
+      del game['players'][request.sid]
+
+      # If host disconnects, end game
+      if request.sid == game['host']:
+        emit('game_ended', {'message': 'Host disconnected'}, room=room_code)
+        del games[room_code]
+      else:
+        # Notify others about disconnection
+        emit('player_left', {
+            'player_id': request.sid,
+            'name': player_name
+        }, room=room_code)
+
+      leave_room(room_code)
+      break
+
+
+if __name__ == '__main__':
+  socketio.run(app, host='0.0.0.0', debug=True)
+
+''''
+(socket.js)
+''''
+import { io } from 'socket.io-client';
+import { writable } from 'svelte/store';
+import { gameState } from './store';
+
+export const socket = io('http://192.168.18.5:5000');
+
+socket.on('connect', () => {
+  console.log('Connected to server');
+});
+
+// Host events
+socket.on('game_created', (data) => {
+  gameState.update((state) => ({
+    ...state,
+    roomCode: data.room_code,
+    isHost: true,
+    error: null
+  }));
+});
+
+socket.on('player_joined', (data) => {
+  gameState.update((state) => ({
+    ...state,
+    players: {
+      ...state.players,
+      [data.player_id]: {
+        name: data.name,
+        score: 0
+      }
+    }
+  }));
+});
+
+// Remove player from game
+socket.on('player_left', (data) => {
+  gameState.update(state => ({
+    ...state,
+    players: {
+      ...state.players,
+      [data.player_id]: null
+    }
+  }));
+});
+
+// Player events
+socket.on('game_joined', (data) => {
+  gameState.update((state) => ({
+    ...state,
+    roomCode: data.room_code,
+    playerId: data.player_id,
+    players: data.players,
+    error: null
+  }));
+});
+
+socket.on('game_started', (data) => {
+  gameState.update(state => ({
+    ...state,
+    gamePhase: 'choosing',
+    currentPlayer: data.currentPlayer
+  }));
+});
+
+socket.on('category_selected', (data) => {
+  gameState.update(state => ({
+    ...state,
+    selectedCategory: data.category,
+    gamePhase: 'question'
+  }));
+});
+
+socket.on('question_received', (data) => {
+  gameState.update(state => ({
+    ...state,
+    currentQuestion: data.question,
+    answers: [],
+    timeLeft: 30
+  }));
+});
+
+socket.on('answer_submitted', (data) => {
+  gameState.update(state => ({
+    ...state,
+    answers: [...state.answers, data]
+  }));
+});
+
+socket.on('round_ended', (data) => {
+  gameState.update(state => ({
+    ...state,
+    scores: data.scores,
+    gamePhase: 'leaderboard'
+  }));
+});
+
+socket.on('game_ended', (data) => {
+  gameState.update(state => ({
+    ...state,
+    gamePhase: 'winner',
+    winner: data.winner
+  }));
+});
+
+socket.on('error', (data) => {
+  gameState.update((state) => ({
+    ...state,
+    error: data.message
+  }));
+});
+''''
+(store.js)
+''''
+import { writable } from 'svelte/store';
+
+const initialState = {
+  roomCode: null,
+  isHost: false,
+  playerId: null,
+  players: {},
+  currentPlayer: null,
+  currentQuestion: null,
+  selectedCategory: null,
+  answers: [],
+  scores: {},
+  error: null,
+  gamePhase: 'lobby', // lobby, choosing, question, answer, leaderboard, winner
+  timeLeft: null
+};
+
+export const gameState = writable(initialState);
+
+// Helper function to reset game state
+export function resetGame() {
+  gameState.set(initialState);
+}
+''''
+(PlayerIcon.svelte)
+''''
+<script>
+  export let name = null;
+  export let connected = true;
+  export let score = 0;
+  export let answered = false;
+  export let isCurrentPlayer = false;
+  export let size = '';
+  
+  const colors = [
+    'bg-blue-500',
+    'bg-green-500',
+    'bg-yellow-500',
+    'bg-purple-500',
+    'bg-pink-500',
+    'bg-indigo-500',
+    'bg-red-500',
+    'bg-orange-500'
+  ];
+  
+  // Generate consistent color based on name
+  $: playerColor = name ? 
+    colors[name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % colors.length] :
+    'bg-gray-700';
+</script>
+
+<div class="text-center">
+  <div class="relative mb-2">
+    <div class={`
+      rounded-full flex items-center justify-center font-bold
+      ${size == 'lg' ? 'w-24 h-24' : 'w-16 h-16'}
+      ${size == 'lg' ? 'text-4xl' : 'text-2xl'}
+      ${connected ? playerColor : 'bg-gray-700 opacity-30'}
+      ${isCurrentPlayer ? 'ring-4 ring-white' : ''}
+      ${answered ? 'ring-2 ring-green-400' : ''}
+    `}>
+      {#if name}
+        {name[0].toUpperCase()}
+      {:else}
+        ?
+      {/if}
+    </div>
+    
+    {#if score > 0}
+      <div class="absolute -top-2 -right-2 bg-white text-gray-900 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold">
+        {score}
+      </div>
+    {/if}
+  </div>
+  
+  {#if name}
+    <div class="text-sm font-medium truncate">
+      {name}
+    </div>
+  {/if}
+</div>
+''''
+(src/routes/host/+layout.svelte)
+''''
+<script>
+  import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { gameState } from '$lib/store';
+  import { socket } from '$lib/socket';
+
+  onMount(async () => {
+    // Redirect to home if not a host
+    const unsubscribe = gameState.subscribe(state => {
+      // if (!state.isHost) {
+      //   goto('/');
+      // }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  });
+</script>
+
+<slot />
+''''
+(src/routes/host/lobby/+page.svelte)
+''''
+<script>
+  import { onMount, onDestroy } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { gameState } from '$lib/store';
+  import { resetGame } from '$lib/store';
+  import { socket } from '$lib/socket';
+  import PlayerIcon from '$lib/components/PlayerIcon.svelte';
+  import RoomCode from '$lib/components/RoomCode.svelte';
+  import { on } from 'svelte/events';
+  
+  let startingGame = false;
+  
+  onMount(async () => {
+    // Create game room when host enters lobby
+    socket.emit('create_game', {
+      // You might want to add host configuration options here
+      "name": "Host"
+    });
+  });
+
+  onDestroy(() => {
+    // reset game state when leaving host page
+    if ($gameState.gamePhase == 'lobby') {
+      resetGame();
+    }
+  });
+  
+  function startGame() {
+    startingGame = true;
+    socket.emit('start_game', { room_code: $gameState.roomCode });
+    
+    // Navigate to next game phase after emitting event
+    goto('/host/category');
+  }
+</script>
+
+<div class="min-h-screen bg-gray-900 text-white p-8">
+  <div class="max-w-4xl mx-auto">
+    <div class="text-center mb-8">
+      <RoomCode code={$gameState.roomCode} />
+      <p class="mt-2 text-gray-400">Share this code with players</p>
+    </div>
+    
+    <div class="grid grid-cols-4 place-items-center gap-6 mb-8">
+      {#each Object.entries($gameState.players) as [id, player]}
+        <PlayerIcon 
+          name={player.name}
+          connected={true}
+          score={player.score}
+        />
+      {/each}
+      
+      {#each Array(8 - Object.keys($gameState.players).length) as _}
+        <PlayerIcon connected={false} />
+      {/each}
+    </div>
+    
+    <div class="text-center">
+      <button
+        class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-full disabled:opacity-50 disabled:cursor-not-allowed"
+        disabled={Object.keys($gameState.players).length < 2 || startingGame}
+        on:click={startGame}
+      >
+        {#if startingGame}
+            Starting...
+        {:else}
+            Start Game ({Object.keys($gameState.players).length}/8 Players)
+        {/if}
+      </button>
+    </div>
+  </div>
+</div>
+''''
+(src/routes/player/+layout.svelte)
+''''
+<script>
+  import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { gameState } from '$lib/store';
+
+  onMount(() => {
+    // Redirect to join page if not connected as player
+    const unsubscribe = gameState.subscribe(state => {
+      if (!state.playerId && window.location.pathname !== '/player/join') {
+        goto('/player/join');
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  });
+</script>
+
+<slot />
+''''
+(src/routes/player/join/+page.svelte)
+''''
+<script>
+  import { goto } from '$app/navigation';
+  import { gameState } from '$lib/store';
+  import { socket } from '$lib/socket';
+  
+  let playerName = '';
+  let roomCode = '';
+  
+  // Subscribe to game state to handle navigation after successful join
+  $: if ($gameState.playerId) {
+    goto('/player/wait');
+  }
+  
+  function handleJoin() {
+    if (playerName.trim() && roomCode.trim()) {
+      socket.emit('join_game', {
+        room_code: roomCode.toUpperCase(),
+        name: playerName.trim()
+      });
+    }
+  }
+</script>
+
+<div class="min-h-screen bg-gray-900 text-white p-4 flex items-center justify-center">
+  <div class="w-full max-w-sm">
+    <h1 class="text-3xl font-bold text-center mb-8">Join Game</h1>
+    
+    <div class="space-y-4">
+      <div>
+        <label for="room-code" class="block text-sm font-medium mb-1">Room Code</label>
+        <input
+          id="room-code"
+          type="text"
+          bind:value={roomCode}
+          placeholder="Enter Room Code"
+          maxlength="4"
+          class="w-full bg-gray-800 border border-gray-700 rounded-lg p-4 text-center text-2xl uppercase tracking-widest"
+        />
+      </div>
+      
+      <div>
+        <label for="player-name" class="block text-sm font-medium mb-1">Your Name</label>
+        <input
+          id="player-name"
+          type="text"
+          bind:value={playerName}
+          placeholder="Enter Your Name"
+          maxlength="12"
+          class="w-full bg-gray-800 border border-gray-700 rounded-lg p-4"
+        />
+      </div>
+      
+      <button
+        on:click={handleJoin}
+        disabled={!playerName.trim() || !roomCode.trim()}
+        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-6 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        Join Game
+      </button>
+    </div>
+    
+    {#if $gameState.error}
+      <div class="mt-4 p-4 bg-red-900/50 border border-red-500 rounded-lg text-center">
+        {$gameState.error}
+      </div>
+    {/if}
+  </div>
+</div>
+''''
+(src/routes/player/wait/+page.svelte)
+''''
+<script>
+  import { gameState } from '$lib/store';
+  import PlayerIcon from '$lib/components/PlayerIcon.svelte';
+  
+  // Subscribe to game state changes to handle navigation
+  $: if ($gameState.currentPlayer === $gameState.playerId) {
+    goto('/player/choose-category');
+  }
+</script>
+
+<div class="min-h-screen bg-gray-900 text-white p-4 flex items-center justify-center">
+  <div class="text-center">
+    <div class="mb-8 flex items-center justify-center">
+      <PlayerIcon 
+        name={$gameState.players[$gameState.playerId]?.name}
+        score={$gameState.players[$gameState.playerId]?.score}
+        connected={true}
+        size="lg"
+      />
+    </div>
+    
+    {#if $gameState.currentPlayer}
+      <p class="text-xl mb-4">
+        {$gameState.players[$gameState.currentPlayer]?.name} is choosing a category...
+      </p>
+    {:else}
+      <p class="text-xl mb-4">Waiting for the game to start...</p>
+    {/if}
+    
+    <div class="text-gray-400">
+      Room Code: {$gameState.roomCode}
+    </div>
+  </div>
+</div>
+''''
